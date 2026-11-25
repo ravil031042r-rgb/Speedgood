@@ -1,20 +1,17 @@
 package com.speedgod.module
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
-import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import java.lang.ref.WeakReference
 import java.lang.reflect.Modifier
@@ -32,8 +29,11 @@ object OverlayManager {
     @Volatile private var isExpanded = false
     @Volatile private var activeTab = 0 // 0 = Speed, 1 = Mini GG
     @Volatile private var selectedType = MemScanner.TYPE_DWORD
-    @Volatile private var lastSearchText = ""
-    @Volatile private var lastEditText = ""
+    @Volatile private var searchText = ""
+    @Volatile private var editText = ""
+    @Volatile private var activeInput = 0 // 0 = search, 1 = edit
+    @Volatile private var numpadVisible = true
+    @Volatile private var editingSingleAddr: String? = null
     @Volatile private var badgeX = 24
     @Volatile private var badgeY = 220
 
@@ -125,11 +125,11 @@ object OverlayManager {
     private fun dp(ctx: Context, v: Int): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics).roundToInt()
 
-    private fun pillBg(color: Int, radiusDp: Int, ctx: Context, strokeColor: Int = 0): GradientDrawable {
+    private fun pillBg(color: Int, radiusDp: Int, ctx: Context, strokeColor: Int = 0, strokeDp: Int = 1): GradientDrawable {
         return GradientDrawable().apply {
             setColor(color)
             cornerRadius = dp(ctx, radiusDp).toFloat()
-            if (strokeColor != 0) setStroke(dp(ctx, 1), strokeColor)
+            if (strokeColor != 0) setStroke(dp(ctx, strokeDp), strokeColor)
         }
     }
 
@@ -155,18 +155,18 @@ object OverlayManager {
         }
 
         // Expanded panel
-        val panelWidth = (dm.widthPixels - dp(activity, 24)).coerceAtMost(dp(activity, 340))
+        val panelWidth = (dm.widthPixels - dp(activity, 20)).coerceAtMost(dp(activity, 344))
         val panel = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            background = pillBg(Color.parseColor("#F00B1120"), 16, activity, Color.parseColor("#334155"))
-            setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 12))
+            background = pillBg(Color.parseColor("#F20B1120"), 16, activity, Color.parseColor("#334155"))
+            setPadding(dp(activity, 10), dp(activity, 8), dp(activity, 10), dp(activity, 10))
             elevation = dp(activity, 10).toFloat()
             isClickable = true
             isFocusable = true
         }
         val panelLp = FrameLayout.LayoutParams(panelWidth, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            topMargin = dp(activity, 24)
+            topMargin = dp(activity, 18)
         }
 
         fun syncVisibility() {
@@ -215,8 +215,8 @@ object OverlayManager {
         val tabRow = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(activity, 8)
-                bottomMargin = dp(activity, 8)
+                topMargin = dp(activity, 6)
+                bottomMargin = dp(activity, 6)
             }
         }
         val tabSpeedBtn = TextView(activity).apply {
@@ -247,7 +247,7 @@ object OverlayManager {
         val contentScroll = ScrollView(activity).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                (dm.heightPixels * 0.56f).roundToInt().coerceAtMost(dp(activity, 420))
+                (dm.heightPixels * 0.68f).roundToInt().coerceAtMost(dp(activity, 520))
             )
         }
         val contentHolder = FrameLayout(activity)
@@ -267,7 +267,7 @@ object OverlayManager {
         speedContainer.addView(bigSpeedTv)
 
         val seekBar = SeekBar(activity).apply {
-            max = 199 // 0.1 .. 20.0
+            max = 199
             progress = ((currentSpeed * 10.0).roundToInt() - 1).coerceIn(0, 199)
         }
 
@@ -337,7 +337,6 @@ object OverlayManager {
         speedContainer.addView(makePresetRow(listOf(0.25, 0.5, 1.0, 2.0)))
         speedContainer.addView(makePresetRow(listOf(3.0, 5.0, 10.0, 20.0)))
 
-        // Fine tune row
         val fineRow = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -404,7 +403,7 @@ object OverlayManager {
         bottomSpeedRow.addView(resetSpeedBtn)
         speedContainer.addView(bottomSpeedRow)
 
-        // --- TAB 1: MINI GG ---
+        // --- TAB 1: MINI GG (WITH BUILT-IN NUMPAD) ---
         val ggContainer = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
 
         // Type selector
@@ -448,39 +447,6 @@ object OverlayManager {
         refreshTypeButtons()
         ggContainer.addView(typeRow)
 
-        fun makeNumInput(hintText: String, initial: String): EditText {
-            return EditText(activity).apply {
-                hint = hintText
-                setText(initial)
-                setTextColor(Color.WHITE)
-                setHintTextColor(Color.parseColor("#64748B"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
-                background = pillBg(Color.parseColor("#1E293B"), 8, activity, Color.parseColor("#475569"))
-                setPadding(dp(activity, 10), dp(activity, 7), dp(activity, 10), dp(activity, 7))
-                isFocusable = true
-                isFocusableInTouchMode = true
-                setOnClickListener {
-                    requestFocus()
-                    val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                    imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-                }
-            }
-        }
-
-        val searchInput = makeNumInput("Число для поиска (напр. 1500)", lastSearchText).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(activity, 7)
-            }
-        }
-        ggContainer.addView(searchInput)
-
-        val searchBtnRow = LinearLayout(activity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(activity, 6)
-            }
-        }
         fun makeActionBtn(label: String, bgColor: Int, weight: Float = 1f): TextView {
             return TextView(activity).apply {
                 text = label
@@ -495,6 +461,24 @@ object OverlayManager {
                 }
             }
         }
+
+        // Custom clickable display boxes (no system keyboard needed!)
+        val searchBoxTv = TextView(activity).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            typeface = Typeface.MONOSPACE
+            setPadding(dp(activity, 10), dp(activity, 8), dp(activity, 10), dp(activity, 8))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(activity, 6)
+            }
+        }
+        ggContainer.addView(searchBoxTv)
+
+        val searchBtnRow = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(activity, 5)
+            }
+        }
         val newSearchBtn = makeActionBtn("🔍 Поиск", Color.parseColor("#2563EB"), 1.2f)
         val refineBtn = makeActionBtn("🎯 Отсев", Color.parseColor("#D97706"), 1.2f)
         val clearBtn = makeActionBtn("🗑 Сброс", Color.parseColor("#475569"), 0.9f)
@@ -503,7 +487,79 @@ object OverlayManager {
         searchBtnRow.addView(clearBtn)
         ggContainer.addView(searchBtnRow)
 
-        // Status + Refresh row
+        // Edit All + Freeze row
+        val editRow = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(activity, 6)
+            }
+        }
+        val editBoxTv = TextView(activity).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.MONOSPACE
+            setPadding(dp(activity, 9), dp(activity, 8), dp(activity, 9), dp(activity, 8))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.55f).apply {
+                rightMargin = dp(activity, 4)
+            }
+        }
+        val editAllBtn = makeActionBtn("✏️ Все", Color.parseColor("#16A34A"), 0.85f)
+        val freezeAllBtn = makeActionBtn("❄️", Color.parseColor("#0284C7"), 0.45f)
+        val unfreezeAllBtn = makeActionBtn("🔥", Color.parseColor("#DC2626"), 0.45f)
+        editRow.addView(editBoxTv)
+        editRow.addView(editAllBtn)
+        editRow.addView(freezeAllBtn)
+        editRow.addView(unfreezeAllBtn)
+        ggContainer.addView(editRow)
+
+        // Single-address edit banner (shown when tapping ✏️ on one address)
+        val singleEditBar = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = pillBg(Color.parseColor("#14532D"), 8, activity, Color.parseColor("#22C55E"))
+            setPadding(dp(activity, 8), dp(activity, 5), dp(activity, 6), dp(activity, 5))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(activity, 5)
+            }
+            visibility = View.GONE
+        }
+        val singleEditLabel = TextView(activity).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val singleApplyBtn = TextView(activity).apply {
+            text = "✅ Записать"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            typeface = Typeface.DEFAULT_BOLD
+            background = pillBg(Color.parseColor("#16A34A"), 6, activity)
+            setPadding(dp(activity, 8), dp(activity, 5), dp(activity, 8), dp(activity, 5))
+        }
+        val singleCancelBtn = TextView(activity).apply {
+            text = "✕"
+            setTextColor(Color.parseColor("#CBD5E1"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(activity, 8), dp(activity, 4), dp(activity, 4), dp(activity, 4))
+        }
+        singleEditBar.addView(singleEditLabel)
+        singleEditBar.addView(singleApplyBtn)
+        singleEditBar.addView(singleCancelBtn)
+        ggContainer.addView(singleEditBar)
+
+        // Built-in Numpad
+        val numpadContainer = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            background = pillBg(Color.parseColor("#0F172A"), 10, activity, Color.parseColor("#334155"))
+            setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(activity, 6)
+            }
+        }
+
+        // Status + Refresh + Keyboard toggle row
         val statusRow = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -517,59 +573,169 @@ object OverlayManager {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val refreshBtn = TextView(activity).apply {
-            text = "↻ Обновить"
-            setTextColor(Color.parseColor("#38BDF8"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(activity, 8), dp(activity, 4), dp(activity, 6), dp(activity, 4))
+        val togglePadBtn = TextView(activity).apply {
+            text = "⌨️"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(dp(activity, 8), dp(activity, 4), dp(activity, 8), dp(activity, 4))
             background = pillBg(Color.parseColor("#1E293B"), 6, activity)
-        }
-        statusRow.addView(statusTv)
-        statusRow.addView(refreshBtn)
-        ggContainer.addView(statusRow)
-
-        // Edit All + Freeze row
-        val editRow = LinearLayout(activity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(activity, 6)
-            }
-        }
-        val editInput = makeNumInput("Новое значение", lastEditText).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.5f).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 rightMargin = dp(activity, 4)
             }
         }
-        val editAllBtn = makeActionBtn("✏️ Все", Color.parseColor("#16A34A"), 0.85f)
-        val freezeAllBtn = makeActionBtn("❄️", Color.parseColor("#0284C7"), 0.48f)
-        val unfreezeAllBtn = makeActionBtn("🔥", Color.parseColor("#DC2626"), 0.48f)
-        editRow.addView(editInput)
-        editRow.addView(editAllBtn)
-        editRow.addView(freezeAllBtn)
-        editRow.addView(unfreezeAllBtn)
-        ggContainer.addView(editRow)
+        val refreshBtn = TextView(activity).apply {
+            text = "↻"
+            setTextColor(Color.parseColor("#38BDF8"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(activity, 9), dp(activity, 4), dp(activity, 9), dp(activity, 4))
+            background = pillBg(Color.parseColor("#1E293B"), 6, activity)
+        }
+        statusRow.addView(statusTv)
+        statusRow.addView(togglePadBtn)
+        statusRow.addView(refreshBtn)
+
+        ggContainer.addView(numpadContainer)
+        ggContainer.addView(statusRow)
 
         // Results list container
         val resultsList = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(activity, 6)
+                topMargin = dp(activity, 5)
             }
         }
         ggContainer.addView(resultsList)
 
+        fun syncInputsUi() {
+            val sActive = (activeInput == 0)
+            searchBoxTv.background = pillBg(
+                Color.parseColor("#1E293B"), 8, activity,
+                if (sActive) Color.parseColor("#38BDF8") else Color.parseColor("#475569"),
+                if (sActive) 2 else 1
+            )
+            if (searchText.isEmpty()) {
+                searchBoxTv.text = if (sActive) "Поиск: |" else "Нажмите для ввода числа..."
+                searchBoxTv.setTextColor(Color.parseColor("#64748B"))
+            } else {
+                searchBoxTv.text = if (sActive) "Поиск: $searchText|" else "Поиск: $searchText"
+                searchBoxTv.setTextColor(Color.WHITE)
+            }
+
+            val eActive = (activeInput == 1)
+            editBoxTv.background = pillBg(
+                Color.parseColor("#1E293B"), 8, activity,
+                if (eActive) Color.parseColor("#22C55E") else Color.parseColor("#475569"),
+                if (eActive) 2 else 1
+            )
+            if (editText.isEmpty()) {
+                editBoxTv.text = if (eActive) "Новое: |" else "Новое значение..."
+                editBoxTv.setTextColor(Color.parseColor("#64748B"))
+            } else {
+                editBoxTv.text = if (eActive) "$editText|" else editText
+                editBoxTv.setTextColor(Color.WHITE)
+            }
+
+            numpadContainer.visibility = if (numpadVisible) View.VISIBLE else View.GONE
+            togglePadBtn.background = pillBg(
+                if (numpadVisible) Color.parseColor("#2563EB") else Color.parseColor("#1E293B"),
+                6, activity
+            )
+
+            val sa = editingSingleAddr
+            if (sa != null) {
+                singleEditBar.visibility = View.VISIBLE
+                val shortA = if (sa.length > 8) ".." + sa.takeLast(8) else sa
+                singleEditLabel.text = "Меняем $shortA"
+            } else {
+                singleEditBar.visibility = View.GONE
+            }
+        }
+
+        fun onNumpadKey(k: String) {
+            val cur = if (activeInput == 0) searchText else editText
+            val next = when (k) {
+                "⌫" -> if (cur.isNotEmpty()) cur.dropLast(1) else ""
+                "C" -> ""
+                "-" -> if (cur.startsWith("-")) cur.drop(1) else "-$cur"
+                "." -> when {
+                    cur.contains(".") -> cur
+                    cur.isEmpty() || cur == "-" -> "${cur}0."
+                    else -> "$cur."
+                }
+                "999k" -> "999999"
+                "000" -> if (cur.length <= 13) cur + "000" else cur
+                else -> if (cur.length <= 16) cur + k else cur
+            }
+            if (activeInput == 0) searchText = next else editText = next
+            syncInputsUi()
+        }
+
+        // Build 4x4 numpad grid
+        val padRows = listOf(
+            listOf("7", "8", "9", "⌫"),
+            listOf("4", "5", "6", "C"),
+            listOf("1", "2", "3", "."),
+            listOf("-", "0", "000", "999k")
+        )
+        for (keys in padRows) {
+            val row = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(0, dp(activity, 2), 0, dp(activity, 2))
+                }
+            }
+            for (k in keys) {
+                val bgCol = when (k) {
+                    "⌫" -> Color.parseColor("#7F1D1D")
+                    "C" -> Color.parseColor("#475569")
+                    "999k" -> Color.parseColor("#14532D")
+                    ".", "-", "000" -> Color.parseColor("#1E3A5F")
+                    else -> Color.parseColor("#1E293B")
+                }
+                val btn = TextView(activity).apply {
+                    text = k
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(activity, 8), 0, dp(activity, 8))
+                    background = pillBg(bgCol, 7, activity, Color.parseColor("#334155"))
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        setMargins(dp(activity, 2), 0, dp(activity, 2), 0)
+                    }
+                    setOnClickListener { onNumpadKey(k) }
+                }
+                row.addView(btn)
+            }
+            numpadContainer.addView(row)
+        }
+
+        searchBoxTv.setOnClickListener {
+            activeInput = 0
+            numpadVisible = true
+            syncInputsUi()
+        }
+        editBoxTv.setOnClickListener {
+            activeInput = 1
+            numpadVisible = true
+            syncInputsUi()
+        }
+        togglePadBtn.setOnClickListener {
+            numpadVisible = !numpadVisible
+            syncInputsUi()
+        }
+
         fun refreshResultsUi(customMsg: String? = null) {
             val total = MemScanner.getResultCount()
             val frozen = MemScanner.getFrozenCount()
-            statusTv.text = customMsg ?: "Найдено: $total | ❄️ Заморожено: $frozen"
+            statusTv.text = customMsg ?: "Найдено: $total | ❄️: $frozen"
             resultsList.removeAllViews()
             if (total <= 0) return
 
             if (total > 100) {
                 val hint = TextView(activity).apply {
-                    text = "Показаны первые 25 из $total. Измените число в игре и нажмите «🎯 Отсев»."
+                    text = "Показаны 25 из $total. Измените число в игре и нажмите «🎯 Отсев»."
                     setTextColor(Color.parseColor("#FBBF24"))
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
                     setPadding(dp(activity, 4), dp(activity, 2), dp(activity, 4), dp(activity, 4))
@@ -607,22 +773,12 @@ object OverlayManager {
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                     setPadding(dp(activity, 8), dp(activity, 3), dp(activity, 8), dp(activity, 3))
                     setOnClickListener {
-                        val dlgInput = EditText(activity).apply {
-                            setText(curVal)
-                            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
-                        }
-                        AlertDialog.Builder(activity)
-                            .setTitle("Изменить 0x$addr")
-                            .setView(dlgInput)
-                            .setPositiveButton("Сохранить") { _, _ ->
-                                val nv = dlgInput.text.toString().trim()
-                                if (nv.isNotEmpty()) {
-                                    MemScanner.editOne(addr, selectedType, nv)
-                                    refreshResultsUi()
-                                }
-                            }
-                            .setNegativeButton("Отмена", null)
-                            .show()
+                        editingSingleAddr = addr
+                        if (editText.isEmpty()) editText = curVal
+                        activeInput = 1
+                        numpadVisible = true
+                        syncInputsUi()
+                        contentScroll.smoothScrollTo(0, 0)
                     }
                 }
                 val oneFreezeBtn = TextView(activity).apply {
@@ -631,7 +787,7 @@ object OverlayManager {
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                     setPadding(dp(activity, 8), dp(activity, 3), dp(activity, 6), dp(activity, 3))
                     setOnClickListener {
-                        val targetVal = editInput.text.toString().trim().ifEmpty { curVal }
+                        val targetVal = editText.trim().ifEmpty { curVal }
                         MemScanner.toggleFreeze(addr, selectedType, targetVal)
                         refreshResultsUi()
                     }
@@ -643,11 +799,32 @@ object OverlayManager {
             }
         }
 
+        singleApplyBtn.setOnClickListener {
+            val sa = editingSingleAddr ?: return@setOnClickListener
+            val nv = editText.trim()
+            if (nv.isEmpty()) {
+                statusTv.text = "Введите число в поле «Новое значение»"
+                return@setOnClickListener
+            }
+            val ok = MemScanner.editOne(sa, selectedType, nv)
+            editingSingleAddr = null
+            numpadVisible = false
+            syncInputsUi()
+            refreshResultsUi(if (ok) "Записано $nv | ❄️: ${MemScanner.getFrozenCount()}" else "Ошибка записи адреса")
+        }
+
+        singleCancelBtn.setOnClickListener {
+            editingSingleAddr = null
+            syncInputsUi()
+        }
+
         newSearchBtn.setOnClickListener {
-            val q = searchInput.text.toString().trim()
-            lastSearchText = q
+            val q = searchText.trim()
             if (q.isEmpty()) {
-                statusTv.text = "Введите число для поиска"
+                statusTv.text = "Введите число на клавиатуре ниже"
+                activeInput = 0
+                numpadVisible = true
+                syncInputsUi()
                 return@setOnClickListener
             }
             statusTv.text = "⏳ Идёт поиск..."
@@ -657,17 +834,23 @@ object OverlayManager {
                     when {
                         count == -2 -> statusTv.text = "Ошибка: нативный модуль не загружен"
                         count < 0 -> statusTv.text = "Некорректное число"
-                        else -> refreshResultsUi()
+                        else -> {
+                            numpadVisible = false
+                            syncInputsUi()
+                            refreshResultsUi()
+                        }
                     }
                 }
             }.start()
         }
 
         refineBtn.setOnClickListener {
-            val q = searchInput.text.toString().trim()
-            lastSearchText = q
+            val q = searchText.trim()
             if (q.isEmpty()) {
                 statusTv.text = "Введите новое число для отсева"
+                activeInput = 0
+                numpadVisible = true
+                syncInputsUi()
                 return@setOnClickListener
             }
             statusTv.text = "⏳ Отсев..."
@@ -677,7 +860,11 @@ object OverlayManager {
                     when {
                         count == -2 -> statusTv.text = "Ошибка: нативный модуль не загружен"
                         count < 0 -> statusTv.text = "Некорректное число"
-                        else -> refreshResultsUi()
+                        else -> {
+                            numpadVisible = false
+                            syncInputsUi()
+                            refreshResultsUi()
+                        }
                     }
                 }
             }.start()
@@ -685,24 +872,33 @@ object OverlayManager {
 
         clearBtn.setOnClickListener {
             MemScanner.clearSearch()
+            editingSingleAddr = null
+            searchText = ""
+            activeInput = 0
+            numpadVisible = true
+            syncInputsUi()
             refreshResultsUi("Поиск очищен | ❄️: ${MemScanner.getFrozenCount()}")
         }
 
         refreshBtn.setOnClickListener { refreshResultsUi() }
 
         editAllBtn.setOnClickListener {
-            val nv = editInput.text.toString().trim()
-            lastEditText = nv
+            val nv = editText.trim()
             if (nv.isEmpty()) {
                 statusTv.text = "Введите новое значение"
+                activeInput = 1
+                numpadVisible = true
+                syncInputsUi()
                 return@setOnClickListener
             }
             val n = MemScanner.editAll(selectedType, nv)
+            numpadVisible = false
+            syncInputsUi()
             refreshResultsUi("Изменено адресов: $n | ❄️: ${MemScanner.getFrozenCount()}")
         }
 
         freezeAllBtn.setOnClickListener {
-            val nv = editInput.text.toString().trim().ifEmpty { searchInput.text.toString().trim() }
+            val nv = editText.trim().ifEmpty { searchText.trim() }
             if (nv.isEmpty()) {
                 statusTv.text = "Введите значение для заморозки"
                 return@setOnClickListener
@@ -732,7 +928,10 @@ object OverlayManager {
                 8, activity
             )
             tabGgBtn.setTextColor(if (activeTab == 1) Color.WHITE else Color.parseColor("#94A3B8"))
-            if (activeTab == 1) refreshResultsUi()
+            if (activeTab == 1) {
+                syncInputsUi()
+                refreshResultsUi()
+            }
         }
 
         tabSpeedBtn.setOnClickListener { activeTab = 0; syncTabs() }
