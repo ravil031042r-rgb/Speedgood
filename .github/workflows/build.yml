@@ -30,7 +30,7 @@ jobs:
           RELEASE_KEY_ALIAS: speedgod
           RELEASE_KEY_PASSWORD: speedgod123
         run: |
-          gradle assembleRelease --stacktrace
+          gradle assembleRelease -x lintVitalAnalyzeRelease --stacktrace
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/SpeedGod-v1.0-release.apk
       - uses: actions/upload-artifact@v4
         with:

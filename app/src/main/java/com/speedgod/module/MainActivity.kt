@@ -12,7 +12,7 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.parseColor("#0B1120"))
             setTextColor(Color.WHITE)
             setPadding(48, 96, 48, 48)
-            text = "SpeedGod Ready"
+            text = "SpeedGod + MiniGG Ready"
         })
     }
 }

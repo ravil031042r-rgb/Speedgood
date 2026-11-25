@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(speedhack LANGUAGES CXX)
 find_package(shadowhook REQUIRED CONFIG)
-add_library(speedhack SHARED speedhack.cpp)
+add_library(speedhack SHARED mem_scanner.cpp speedhack.cpp)
 target_link_libraries(speedhack shadowhook::shadowhook log)
 target_link_options(speedhack PRIVATE "-Wl,-z,max-page-size=16384")
