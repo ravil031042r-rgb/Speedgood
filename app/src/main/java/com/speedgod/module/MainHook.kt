@@ -23,7 +23,8 @@ class MainHook : IXposedHookZygoteInit, IXposedHookLoadPackage {
         if (!hooked.compareAndSet(false, true)) return
         if (modPath.isNullOrBlank()) {
             val s = MainHook::class.java.classLoader?.toString() ?: ""
-            modPath = Regex("(/[^,\[\]"'\s]+\.apk)").find(s)?.groupValues?.getOrNull(1)
+            modPath = null
+
         }
         try {
             XposedHelpers.findAndHookMethod(Application::class.java, "onCreate", object : XC_MethodHook() {
