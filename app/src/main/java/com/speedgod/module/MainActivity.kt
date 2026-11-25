@@ -1,4 +1,5 @@
 package com.speedgod.module
+
 import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
@@ -11,9 +12,7 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.parseColor("#0B1120"))
             setTextColor(Color.WHITE)
             setPadding(48, 96, 48, 48)
-            text = "⚡ SpeedGod готов!
-
-Откройте LSPatch → Управление → + → выберите игру → режим Встроенный (Integrated) → Встроить модули → выберите SpeedGod → Начать патч."
+            text = "SpeedGod Ready"
         })
     }
 }
